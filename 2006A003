@@ -1,0 +1,1298 @@
+import sys
+import numpy as np
+import pandas as pd
+import sympy as sp
+from itertools import islice
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                           QHBoxLayout, QTabWidget, QPushButton, QLabel, 
+                           QComboBox, QFileDialog, QSpinBox, QDoubleSpinBox,
+                           QGroupBox, QScrollArea, QTextEdit, QStatusBar,
+                           QProgressBar, QCheckBox, QGridLayout, QMessageBox,
+                           QDialog, QLineEdit)
+from PyQt6.QtCore import Qt
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from sklearn import datasets, preprocessing, model_selection
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.naive_bayes import GaussianNB
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.metrics import accuracy_score, mean_squared_error, confusion_matrix
+import tensorflow as tf
+from tensorflow import keras
+from keras import layers, models, optimizers
+
+class MLCourseGUI(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Machine Learning Course GUI")
+        self.setGeometry(100, 100, 1400, 800)
+        
+        # Initialize main widget and layout
+        self.main_widget = QWidget()
+        self.setCentralWidget(self.main_widget)
+        self.layout = QVBoxLayout(self.main_widget)
+        
+        # Initialize data containers
+        self.X_train = np.zeros((1,1))
+        self.X_test = np.zeros((1,1))
+        self.y_train = np.zeros((1,1))
+        self.y_test = np.zeros((1,1))
+        self.current_model = np.zeros((1,1))
+        
+        # Neural network configuration
+        self.layer_config = []
+        
+        # Create components
+        self.create_data_section()
+        self.create_tabs()
+        self.create_visualization()
+        self.create_status_bar()
+
+    def load_dataset(self):
+        """Load selected dataset"""
+        try:
+            dataset_name = self.dataset_combo.currentText()
+            
+            if dataset_name == "Load Custom Dataset":
+                return
+            
+            # Load selected dataset
+            if dataset_name == "Iris Dataset":
+                data = datasets.load_iris()
+            elif dataset_name == "Breast Cancer Dataset":
+                data = datasets.load_breast_cancer()
+            elif dataset_name == "Digits Dataset":
+                data = datasets.load_digits()
+            elif dataset_name == "Boston Housing Dataset":
+                data = datasets.load_boston()
+            elif dataset_name == "MNIST Dataset":
+                (X_train, y_train), (X_test, y_test) = tf.keras.datasets.mnist.load_data()
+                self.X_train, self.X_test = X_train, X_test
+                self.y_train, self.y_test = y_train, y_test
+                self.status_bar.showMessage(f"Loaded {dataset_name}")
+                return
+            
+            # Split data
+            test_size = self.split_spin.value()
+            self.X_train, self.X_test, self.y_train, self.y_test = \
+                model_selection.train_test_split(data.data, data.target, 
+                                              test_size=test_size, 
+                                              random_state=42)
+            
+            # Apply scaling if selected
+            self.apply_scaling()
+            
+            self.status_bar.showMessage(f"Loaded {dataset_name}")
+            
+        except Exception as e:
+            self.show_error(f"Error loading dataset: {str(e)}")
+    
+    def load_custom_data(self):
+        """Load custom dataset from CSV file"""
+        try:
+            file_name, _ = QFileDialog.getOpenFileName(
+                self,
+                "Load Dataset",
+                "",
+                "CSV files (*.csv)"
+            )
+            
+            if file_name:
+                # Load data
+                data = pd.read_csv(file_name)
+                
+                # Ask user to select target column
+                target_col = self.select_target_column(data.columns)
+                
+                if target_col:
+                    X = data.drop(target_col, axis=1)
+                    y = data[target_col]
+                    
+                    # Split data
+                    test_size = self.split_spin.value()
+                    self.X_train, self.X_test, self.y_train, self.y_test = \
+                        model_selection.train_test_split(X, y, 
+                                                      test_size=test_size, 
+                                                      random_state=42)
+                    
+                    # Apply scaling if selected
+                    self.apply_scaling()
+                    
+                    self.status_bar.showMessage(f"Loaded custom dataset: {file_name}")
+                    
+        except Exception as e:
+            self.show_error(f"Error loading custom dataset: {str(e)}")
+    
+    def select_target_column(self, columns):
+        """Dialog to select target column from dataset"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select Target Column")
+        layout = QVBoxLayout(dialog)
+        
+        combo = QComboBox()
+        combo.addItems(columns)
+        layout.addWidget(combo)
+        
+        btn = QPushButton("Select")
+        btn.clicked.connect(dialog.accept)
+        layout.addWidget(btn)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            return combo.currentText()
+        return None
+    
+    def apply_scaling(self):
+        """Apply selected scaling method to the data"""
+        scaling_method = self.scaling_combo.currentText()
+        
+        if scaling_method != "No Scaling":
+            try:
+                if scaling_method == "Standard Scaling":
+                    scaler = preprocessing.StandardScaler()
+                elif scaling_method == "Min-Max Scaling":
+                    scaler = preprocessing.MinMaxScaler()
+                elif scaling_method == "Robust Scaling":
+                    scaler = preprocessing.RobustScaler()
+                
+                self.X_train = scaler.fit_transform(self.X_train)
+                self.X_test = scaler.transform(self.X_test)
+                
+            except Exception as e:
+                self.show_error(f"Error applying scaling: {str(e)}")
+    
+    def create_data_section(self):
+        """Create the data loading and preprocessing section"""
+        data_group = QGroupBox("Data Management")
+        data_layout = QHBoxLayout()
+        
+        # Dataset selection
+        self.dataset_combo = QComboBox()
+        self.dataset_combo.addItems([
+            "Load Custom Dataset",
+            "Iris Dataset",
+            "Breast Cancer Dataset",
+            "Digits Dataset",
+            "Boston Housing Dataset",
+            "MNIST Dataset"
+        ])
+        self.dataset_combo.currentIndexChanged.connect(self.load_dataset)
+        
+        # Data loading button
+        self.load_btn = QPushButton("Load Data")
+        self.load_btn.clicked.connect(self.load_custom_data)
+        
+        # Preprocessing options
+        self.scaling_combo = QComboBox()
+        self.scaling_combo.addItems([
+            "No Scaling",
+            "Standard Scaling",
+            "Min-Max Scaling",
+            "Robust Scaling"
+        ])
+        # Missing value handling method selection
+        self.handlingmv_combo = QComboBox()
+        self.handlingmv_combo.addItems([
+            "Mean Imputation",
+            "Interpolation",
+            "Forward Fill",
+            "Backward Fill",
+            "None"
+        ])
+        # Train-test split options
+        self.split_spin = QDoubleSpinBox()
+        self.split_spin.setRange(0.1, 0.9)
+        self.split_spin.setValue(0.2)
+        self.split_spin.setSingleStep(0.1)
+        
+        # Add widgets to layout
+        data_layout.addWidget(QLabel("Dataset:"))
+        data_layout.addWidget(self.dataset_combo)
+        data_layout.addWidget(self.load_btn)
+        data_layout.addWidget(QLabel("Scaling:"))
+        data_layout.addWidget(self.scaling_combo)
+        data_layout.addWidget(QLabel("Handling Mis Val:"))
+        data_layout.addWidget(self.handlingmv_combo)
+        data_layout.addWidget(QLabel("Test Split:"))
+        data_layout.addWidget(self.split_spin)
+        
+        data_group.setLayout(data_layout)
+        self.layout.addWidget(data_group)
+    
+    def create_tabs(self):
+        """Create tabs for different ML topics"""
+        self.tab_widget = QTabWidget()
+        
+        # Create individual tabs
+        tabs = [
+            ("Classical ML", self.create_classical_ml_tab),
+            ("Deep Learning", self.create_deep_learning_tab),
+            ("Dimensionality Reduction", self.create_dim_reduction_tab),
+            ("Reinforcement Learning", self.create_rl_tab)
+        ]
+        
+        for tab_name, create_func in tabs:
+            scroll = QScrollArea()
+            tab_widget = create_func()
+            scroll.setWidget(tab_widget)
+            scroll.setWidgetResizable(True)
+            self.tab_widget.addTab(scroll, tab_name)
+        
+        self.layout.addWidget(self.tab_widget)
+    
+    def create_classical_ml_tab(self):
+        """Create the classical machine learning algorithms tab"""
+        widget = QWidget()
+        layout = QGridLayout(widget)
+        
+        # Regression section
+        regression_group = QGroupBox("Regression")
+        regression_layout = QVBoxLayout()
+        
+        # Linear Regression
+        lr_group = self.create_algorithm_group(
+            "Linear Regression",
+            {"fit_intercept": "checkbox",
+             "normalize": "checkbox",
+             "regularize": "checkbox",
+             "loss_function":["Mean Absolute Error", "Mean Squared Error", "Huber Loss"],
+             "optimization":["Batch GD","Mini Batch GD", "Stochastic GD","Momentum","RMSprop","Adam"],
+             "learning_rate":"double",
+             "max_iter": "int"}
+        )
+        regression_layout.addWidget(lr_group)
+
+        # Logistic Regression
+        logistic_group = self.create_algorithm_group(
+            "Logistic Regression",
+            {"C": "double",
+             "max_iter": "int",
+             "multi_class": ["ovr", "multinomial"],
+             "regularize": "checkbox",
+             "loss_function":["Cross-Entrophy", "Hinge Loss"],
+             "optimization":["Batch GD", "Mini Batch GD", "Stochastic GD", "Momentum", "RMSprop", "Adam"],
+             "learning_rate":"double"}
+        )
+        regression_layout.addWidget(logistic_group)
+
+        # Support Vector Machine
+        SVR_group=self.create_algorithm_group(
+            "Support Vector Regression",
+            {"C": "double",
+             "epsilon": "double",
+             "max_iter": "int",
+             "multi_class": ["ovr", "multinomial"],
+             "regularize": "checkbox",
+             "loss_function":["Mean Absolute Error", "Mean Squared Error", "Huber Loss"],
+             "optimization":["Batch GD", "Mini Batch GD", "Stochastic GD", "Momentum", "RMSprop", "Adam"],
+             "learning_rate":"double"}
+        )
+        regression_layout.addWidget(SVR_group)
+
+        regression_group.setLayout(regression_layout)
+        layout.addWidget(regression_group, 0, 0)
+        
+        # Classification section
+        classification_group = QGroupBox("Classification")
+        classification_layout = QVBoxLayout()
+        
+        # Naive Bayes
+        nb_group = self.create_algorithm_group(
+            "Naive Bayes",
+            {"var_smoothing": "double"}
+        )
+        classification_layout.addWidget(nb_group)
+
+        # Gaussian NB
+        gaussianNB_group = self.create_algorithm_group(
+            "Gaussian Naive Bayes",
+            {"var_smoothing": "double",
+             "prior_probabilities": ["uniform", "user-defined"],
+            }
+        )
+        classification_layout.addWidget(gaussianNB_group)
+
+        # SVM
+        svm_group = self.create_algorithm_group(
+            "Support Vector Machine",
+            {"C": "double",
+             "kernel": ["linear", "rbf", "poly"],
+             "degree": "int"}
+        )
+        classification_layout.addWidget(svm_group)
+
+        # Decision Trees
+        dt_group = self.create_algorithm_group(
+            "Decision Tree",
+            {"max_depth": "int",
+             "min_samples_split": "int",
+             "criterion": ["gini", "entropy"]}
+        )
+        classification_layout.addWidget(dt_group)
+        
+        # Random Forest
+        rf_group = self.create_algorithm_group(
+            "Random Forest",
+            {"n_estimators": "int",
+             "max_depth": "int",
+             "min_samples_split": "int"}
+        )
+        classification_layout.addWidget(rf_group)
+        
+        # KNN
+        knn_group = self.create_algorithm_group(
+            "K-Nearest Neighbors",
+            {"n_neighbors": "int",
+             "weights": ["uniform", "distance"],
+             "metric": ["euclidean", "manhattan"]}
+        )
+        classification_layout.addWidget(knn_group)
+        
+        classification_group.setLayout(classification_layout)
+        layout.addWidget(classification_group, 0, 1)
+        
+        return widget
+    
+    def create_dim_reduction_tab(self):
+        """Create the dimensionality reduction tab"""
+        widget = QWidget()
+        layout = QGridLayout(widget)
+        
+        # K-Means section
+        kmeans_group = QGroupBox("K-Means Clustering")
+        kmeans_layout = QVBoxLayout()
+        
+        kmeans_params = self.create_algorithm_group(
+            "K-Means Parameters",
+            {"n_clusters": "int",
+             "max_iter": "int",
+             "n_init": "int"}
+        )
+        kmeans_layout.addWidget(kmeans_params)
+        
+        kmeans_group.setLayout(kmeans_layout)
+        layout.addWidget(kmeans_group, 0, 0)
+        
+        # PCA section
+        pca_group = QGroupBox("Principal Component Analysis")
+        pca_layout = QVBoxLayout()
+        
+        pca_params = self.create_algorithm_group(
+            "PCA Parameters",
+            {"n_components": "int",
+             "whiten": "checkbox"}
+        )
+        pca_layout.addWidget(pca_params)
+        
+        pca_group.setLayout(pca_layout)
+        layout.addWidget(pca_group, 0, 1)
+        
+        return widget
+    
+    def create_rl_tab(self):
+        """Create the reinforcement learning tab"""
+        widget = QWidget()
+        layout = QGridLayout(widget)
+        
+        # Environment selection
+        env_group = QGroupBox("Environment")
+        env_layout = QVBoxLayout()
+        
+        self.env_combo = QComboBox()
+        self.env_combo.addItems([
+            "CartPole-v1",
+            "MountainCar-v0",
+            "Acrobot-v1"
+        ])
+        env_layout.addWidget(self.env_combo)
+        
+        env_group.setLayout(env_layout)
+        layout.addWidget(env_group, 0, 0)
+        
+        # RL Algorithm selection
+        algo_group = QGroupBox("RL Algorithm")
+        algo_layout = QVBoxLayout()
+        
+        self.rl_algo_combo = QComboBox()
+        self.rl_algo_combo.addItems([
+            "Q-Learning",
+            "SARSA",
+            "DQN"
+        ])
+        algo_layout.addWidget(self.rl_algo_combo)
+        
+        algo_group.setLayout(algo_layout)
+        layout.addWidget(algo_group, 0, 1)
+        
+        return widget
+    
+    def create_visualization(self):
+        """Create the visualization section"""
+        viz_group = QGroupBox("Visualization")
+        viz_layout = QHBoxLayout()
+        
+        # Create matplotlib figure
+        self.figure = Figure(figsize=(8, 6))
+        self.canvas = FigureCanvas(self.figure)
+        viz_layout.addWidget(self.canvas)
+        
+        # Metrics display
+        self.metrics_text = QTextEdit()
+        self.metrics_text.setReadOnly(True)
+        viz_layout.addWidget(self.metrics_text)
+        
+        viz_group.setLayout(viz_layout)
+        self.layout.addWidget(viz_group)
+    
+    def create_status_bar(self):
+        """Create the status bar"""
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        
+        # Add progress bar
+        self.progress_bar = QProgressBar()
+        self.status_bar.addPermanentWidget(self.progress_bar)
+    def handle_missing_value(self, X_train, Y_train, handle_method):
+        """Check and handle the missing values"""
+        
+        if handle_method == "Mean Imputation":
+            for i in X_train:
+                for e in X_train[i]:
+                    if e == None:
+                        mean = sum(X_train[i]) / X_train.shape[1]
+                        X_train[i][e] = mean
+                
+            for i in Y_train[1]:
+                if e == None:
+                    mean = sum(Y_train[1]) / Y_train.shape[1]
+                    Y_train[1][e] = mean
+                    
+            return X_train , Y_train
+        
+        elif handle_method == "Interpolation":
+            
+            x_interpolated = pd.DataFrame(X_train).interpolate()
+            y_interpolated = pd.DataFrame(Y_train).interpolate() 
+
+            return x_interpolated, y_interpolated
+        
+        elif handle_method == "Forward/Backward Fill": # forward fill is applied first
+            contains_none = any(x is None for x in X_train)
+            if contains_none:
+                none_index = next(i for i, x in enumerate(X_train) if x is None)
+                for i in none_index: 
+                    X_train[i] = X_train[i-1]
+
+            contains_none = any(x is None for x in X_train)
+            if contains_none:
+                none_index = next(i for i, x in enumerate(X_train) if x is None)
+                for i in none_index[::-1]: 
+                    X_train[i] = X_train[i+1]
+
+            contains_none = any(y is None for y in Y_train)
+            if contains_none:
+                none_index = next(i for i, y in enumerate(Y_train) if y is None)
+                for i in none_index:
+                    Y_train[i] = Y_train[i-1]
+
+            contains_none = any(y is None for y in Y_train)
+            if contains_none:
+                none_index = next(i for i, y in enumerate(Y_train) if y is None)
+                for i in none_index[::-1]:
+                    Y_train[i] = Y_train[i+1]
+
+            return X_train,Y_train
+        
+        elif handle_method == "Backward/Forward Fill": # backward fill is applied first
+            for i in range(len(X_train) -2, 0, -1):
+                if X_train[i] == None:
+                    X_train[i] = X_train[i+1]
+            for i in range(0, len(X_train)-1, 1):
+                if X_train[i] == None:
+                    X_train[i] = X_train[i-1]
+            for i in range(len(Y_train) -2, 0, -1):
+                if Y_train[i] == None:
+                    Y_train[i] = Y_train[i+1]
+            for i in range(0, len(Y_train)-1, 1):
+                if Y_train[i] == None:
+                    Y_train[i] = Y_train[i-1]  
+
+            return X_train,Y_train    
+                                  
+        else:
+            return X_train, Y_train
+           
+    def create_hypothesis_fun(self, X, theta):
+        """Creating hypothesis function"""
+        hypothesis_fun_arr = np.hstack(np.ones((X.shape[0] , 1)), np.dot(theta.T, X))
+        return X, theta, hypothesis_fun_arr
+        
+    def create_cost_fun(self, X, theta, loss_fun_type, Y):
+        """Creating cost function"""
+        X, theta, hypothesis_fun_arr = self.create_hypothesis_fun(X, theta)
+        error = np.zeros((1, Y.shape[0] + 1))
+        lambda_value = 1
+
+        if loss_fun_type == "Mean Squared Error":
+            for i in range(Y.shape[0]):
+                error[i] = ((Y[1][i] - hypothesis_fun_arr[i][1]) ** 2)/ (2 * (Y.shape[0]))
+            return error, Y, X, theta
+        
+        elif loss_fun_type == "Mean Absolute Error":
+            for i in range(Y.shape[0]):
+                error[i] = abs((Y[1][i] - hypothesis_fun_arr[i][1]))/ Y.shape[0]
+            return error, Y, X, theta
+        
+        elif loss_fun_type == "Huber Loss":
+            for i in range(Y.shape[0]):
+                if abs((Y[1][i] - hypothesis_fun_arr[i][1])) <= lambda_value:
+                    error[i] = abs((Y[1][i] - hypothesis_fun_arr[i][1])) / 2
+                else :
+                    error[i] = (lambda_value * abs((Y[1][i] - hypothesis_fun_arr[i][1]))) + (0.5 * lambda_value)
+            return error, Y, X, theta   
+             
+        elif loss_fun_type == "Cross-Entrophy":
+            for i in range(Y.shape[0]):
+                error[i] = -1 * (Y[1][i] * np.log(hypothesis_fun_arr[i][1])) + (1 - Y[1][i]) * (np.log(1 - hypothesis_fun_arr[i][1])) / Y.shape[0]
+            return error, Y, X, theta
+
+        elif loss_fun_type == "Hinge Loss":    
+            for i in range(Y.shape[0]):
+                error[i] = max(0, 1 - (Y[1][i] * hypothesis_fun_arr[i][1]))
+            return error, Y, X, theta
+        
+    def regularize_cost_fun(self, X, theta, loss_fun_type, Y):
+        """Regularizing the cost function"""
+        cost_fun, indep_var, dep_var, theta_values = self.create_cost_fun(X, theta, loss_fun_type, Y)
+        reg_strgt = 1
+        unreg_cost_fun = cost_fun
+        for i in range(len(theta) - 1):
+            cost_fun[f"reg_theta_{i+1}"] = reg_strgt * ((list(theta.values())[i+1] ** 2))
+        reg_cost_fun = cost_fun
+
+        return unreg_cost_fun, reg_cost_fun, indep_var, dep_var, theta_values, reg_strgt
+
+    def optimaze(self, X, theta, loss_fun_type, Y, regularize, optm_type, learning_rate, max_iter, batch_size = 64):
+        """Optimizing to find theta values and obtaining regression line"""
+        unregularized_cost, regularized_cost, indep_var, dep_var, theta_values, reg_strenght = self.regularize_cost_fun(X, theta, loss_fun_type, Y)
+       
+        if regularize == "regularize":
+            if optm_type == "Batch GD":
+                for i in range(max_iter):
+                    pre_unregularized_cost, pre_regularized_cost,_,_,_,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+                    for key in theta_values:          
+                        if key == "theta_0":
+                            unregularized_cost,_,_,_,theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+                            gradient = sum(unregularized_cost.values()) - sum(pre_unregularized_cost.values())
+                            theta_values[key] -= learning_rate * gradient
+                            pre_unregularized_cost = unregularized_cost
+                        else:
+                            _,regularized_cost,_,_,theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+                            gradient = sum(regularized_cost.values()) - sum(pre_regularized_cost.values())
+                            theta_values[key] -= learning_rate * gradient
+           
+            elif optm_type == "Stochastic GD":
+                for i in range(max_iter):
+                    random_index = np.random.randint(len(Y))          
+                    if random_index == 0:
+                        theta_values["theta_0"] -= learning_rate * unregularized_cost["h_0 - y_0"]
+                        unregularized_cost, regularized_cost,_, dep_var, theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+                    else:
+                        theta_values[f"theta_{random_index}"] -= learning_rate * (unregularized_cost["h_0 - y_0"] * dep_var[f"x_{random_index}"] + reg_strenght * theta_values[f"theta_{random_index}"])
+                unregularized_cost,regularized_cost,_,_,theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+
+            elif optm_type == "Mini Batch GD":
+                indices = np.random.choice(len(Y), batch_size, replace=False)
+                for index in indices:
+                    if index == 0:
+                        for i in indices:
+                            cost += unregularized_cost[f"h_{i} - y_{i}"]    
+                        theta_values["theta_0"] -= learning_rate * (1 / batch_size) * cost
+                        unregularized_cost, regularized_cost,_, dep_var, theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+                    else:
+                        for i in indices:
+                            cost += unregularized_cost[f"h_{i} - y_{i}"]  + (theta_values[f"theta_{i}"] * reg_strenght)   
+                        theta_values[f"theta_{i}"] -= learning_rate * (1 / batch_size) * cost
+                unregularized_cost, regularized_cost,_, dep_var, theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+
+            elif optm_type == "Momentum":
+                for i in range(max_iter):
+                    v_p = 0
+                    for theta in theta_values:
+                        if theta == "theta_0":
+                            v_t = 0.9 * v_p + ((0.1) * sum(unregularized_cost.values())) # beta value is 0.9
+                            theta_values["theta_0"] -= learning_rate * v_t
+                            v_p = v_t
+                            unregularized_cost, regularized_cost,_, dep_var, theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+                        else:
+                            v_t = 0.9 * v_p + ((0.1) * sum(regularized_cost.values()))
+                            theta_values["theta_0"] -= learning_rate * v_t
+                    unregularized_cost, regularized_cost,_, dep_var, theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)        
+                        
+            elif optm_type == "RMSprop":
+                for i in range(max_iter):
+                    s_p = 0
+                    for key in theta_values:
+                        if key == "theta_0":
+                            s_t = 0.9 * s_p + ((0.1) * (sum(unregularized_cost.values())**2)) # beta value is 0.9
+                            theta_values["theta_0"] -= learning_rate * (1 / ((s_t + 1e-06 )** 0.5)) * sum(unregularized_cost.values()) # epsilon value is 1e-06
+                            s_p = s_t
+                            unregularized_cost, regularized_cost,_, dep_var, theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+                        else:
+                            s_t = 0.9 * s_p + ((0.1) * (sum(regularized_cost.values())**2)) # beta value is 0.9
+                            theta_values[key] -= learning_rate * (1 / ((s_t + 1e-06 )** 0.5)) * sum(regularized_cost.values()) # epsilon value is 1e-06 
+                    unregularized_cost, regularized_cost,_, dep_var, theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+
+            elif optm_type == "Adam":
+                v,s = {}
+                t, beta_1, beta_2, reg_strenght, epsilon= 0, 0.9, 0.999, 0.01, 1e-08
+                for i in range(len(Y)):
+                    v[f"v_{i}"] = 0
+                    s[f"s_{i}"] = 0
+                v_array = np.array(list(v.values()))
+                s_array = np.array(list(s.values()))
+                X_array = np.array(list(dep_var.values()))
+                Y_array = np.array(list(indep_var.values()))
+                theta_array = np.array(list(theta_values.values()))
+                for i in range(max_iter):
+                    t += 1
+                    gradient = (1 / len(Y_array)) * np.dot(X.T, (np.dot(X_array, theta_array) - Y_array))
+                    gradient[0] = (1 / len(Y_array)) * np.sum(np.dot(X_array[:, 0], (np.dot(X_array, theta_array) - Y_array)))   
+                    gradient[1:] += (reg_strenght / len(Y_array)) * theta[1:]
+                    v_array = beta_1 * v_array + (1 - beta_1) * gradient
+                    s_array = beta_2 * s_array + (1 - beta_2) * np.square(gradient) 
+                    v_corrected = v_array / (1 - beta_1 ** t)
+                    s_corrected = s_array / (1 - beta_2 ** t)
+                    theta_array -= learning_rate * v_corrected / (np.sqrt(s_corrected) + epsilon)
+                theta_values = {f"theta_{i}": theta_array[i] for i in range(len(theta_array))}
+                unregularized_cost, regularized_cost,_, dep_var, theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+
+        else:
+            if optm_type == "Batch GD":
+                for i in range(max_iter):
+                    pre_unregularized_cost, pre_regularized_cost,_,_,_,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+                    for key in theta_values:          
+                            unregularized_cost, regularized_cost,_,_,theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+                            gradient = sum(unregularized_cost.values()) - sum(pre_unregularized_cost.values())
+                            theta_values[key] -= learning_rate * gradient
+           
+            elif optm_type == "Stochastic GD":
+                for i in range(max_iter):
+                    random_index = np.random.randint(len(Y))          
+                    theta_values[f"theta_{random_index}"] -= learning_rate * (unregularized_cost["h_0 - y_0"] * dep_var[f"x_{random_index}"])
+                unregularized_cost,regularized_cost,_,_,theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+
+            elif optm_type == "Mini Batch GD":
+                indices = np.random.choice(len(Y), batch_size, replace=False)
+                for index in indices:
+                    for i in indices:
+                        cost += unregularized_cost[f"h_{i} - y_{i}"]  
+                    theta_values[f"theta_{i}"] -= learning_rate * (1 / batch_size) * cost
+                unregularized_cost, regularized_cost,_, dep_var, theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+
+            elif optm_type == "Momentum":
+                for i in range(max_iter):
+                    v_p = 0
+                    for theta in theta_values:
+                        v_t = 0.9 * v_p + ((0.1) * sum(regularized_cost.values())) # beta value is 0.9
+                        theta_values["theta_0"] -= learning_rate * v_t
+                    unregularized_cost, regularized_cost,_, dep_var, theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)        
+                        
+            elif optm_type == "RMSprop":
+                for i in range(max_iter):
+                    s_p = 0
+                    for key in theta_values:
+                        s_t = 0.9 * s_p + ((0.1) * (sum(unregularized_cost.values())**2)) # beta value is 0.9
+                        theta_values[key] -= learning_rate * (1 / ((s_t + 1e-06 )** 0.5)) * sum(unregularized_cost.values()) # epsilon value is 1e-06 
+                unregularized_cost, regularized_cost,_, dep_var, theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+
+            elif optm_type == "Adam":   # theta values başta sözlük olarak ayarlanıyor varsaymış . array varsayacak şekilde düzelt !!!
+                v,s = {}
+                t, beta_1, beta_2, reg_strenght, epsilon= 0, 0.9, 0.999, 0.01, 1e-08
+                for i in range(len(Y)):
+                    v[f"v_{i}"] = 0
+                    s[f"s_{i}"] = 0
+                v_array = np.array(list(v.values()))
+                s_array = np.array(list(s.values()))
+                X_array = np.array(list(dep_var.values()))
+                Y_array = np.array(list(indep_var.values()))
+                theta_array = np.array(list(theta_values.values()))
+                for i in range(max_iter):
+                    t += 1
+                    gradient = (1 / len(Y_array)) * np.dot(X.T, (np.dot(X_array, theta_array) - Y_array))
+                    gradient[0] = (1 / len(Y_array)) * np.sum(np.dot(X_array[:, 0], (np.dot(X_array, theta_array) - Y_array)))   
+                    gradient[1:] += (reg_strenght / len(Y_array)) * theta[1:]
+                    v_array = beta_1 * v_array + (1 - beta_1) * gradient
+                    s_array = beta_2 * s_array + (1 - beta_2) * np.square(gradient) 
+                    v_corrected = v_array / (1 - beta_1 ** t)
+                    s_corrected = s_array / (1 - beta_2 ** t)
+                    theta_array -= learning_rate * v_corrected / (np.sqrt(s_corrected) + epsilon)
+                theta_values = {f"theta_{i}": theta_array[i] for i in range(len(theta_array))}
+                unregularized_cost, regularized_cost,_, dep_var, theta_values,_ = self.regularize_cost_fun(X, theta_values, loss_fun_type, Y)
+
+        unregularized_cost, regularized_cost, indep_var, dep_var, theta_values, reg_strenght = self.regularize_cost_fun(X, theta, loss_fun_type, Y) 
+        return unregularized_cost, regularized_cost, indep_var, dep_var, theta_values, reg_strenght 
+          
+    def visualize_data(self,prediction_values,y_test):
+        """Update the visualization with regression line"""
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+
+        # Scatter plot of actual vs predicted values
+        ax.scatter(y_test, prediction_values, alpha=0.5, label='Predictions')
+        
+        # Plot the ideal line (y=x)
+        ax.plot([self.y_test.min(), self.y_test.max()],
+            [self.y_test.min(), self.y_test.max()],
+            'r--', label='Ideal')
+        
+        # Plot the regression line
+        ax.plot(self.y_test, self.y_pred, 'g-', label='Regression Line')
+        
+        ax.set_xlabel("Actual Values")
+        ax.set_ylabel("Predicted Values")
+        ax.legend()
+        self.canvas.draw()
+
+    def train_model(self, method_name, param_widgets):
+        """Training of the model"""
+        param_values = {}
+        
+        for param_name, widget in param_widgets.items():
+            if isinstance(widget, QCheckBox):  
+                param_values[param_name] = widget.isChecked() 
+            elif isinstance(widget, QSpinBox) or isinstance(widget, QDoubleSpinBox):  
+                param_values[param_name] = widget.value() 
+            elif isinstance(widget, QComboBox):  
+                param_values[param_name] = widget.currentText()
+            else:
+                param_values[param_name] = None
+
+        if method_name == "Linear Regression" or method_name == "Logistic Regression": 
+
+            # getting training and test samples with their last form after getting handled
+            handle_mis_val= self.handlingmv_combo.currentText()
+            X_train_sample, Y_train_sample = self.handle_missing_value(self.X_train, self.y_train, handle_mis_val)
+            X_test_sample, Y_test_sample = self.handle_missing_value(self.X_test, self.y_test, handle_mis_val)
+
+            dep_var = {}
+            theta = {}
+
+            for i in range(X_train_sample.shape[0]):
+                dep_var[f"x_0_{i+1}"] = 1
+                theta[f"theta_0_{i+1}"] = 0
+    
+            for i in range(len(X_train_sample[0])):           
+                theta[f"theta_{i+1}"] = 0
+
+            for row in range(X_train_sample.shape[0]):
+                for col in range(len(X_train_sample[row])):
+                    dep_var[f"x_{row+1}_{col+1}"] = X_train_sample[row][col]
+                    theta[f"theta_{row+1}_{col+1}"] = 0
+
+            #visualization of data
+            dep_var_values = np.hstack((np.ones((X_train_sample.shape[0] , 1)), X_train_sample)).T
+            theta_values = np.zeros((X_train_sample.shape[0]) , 1).T
+            indep_var_values = np.hstack((np.ones((Y_train_sample.shape[0] , 1)), Y_train_sample)).T
+
+            _,_,_,_,_,theta_values,_=self.optimaze(dep_var_values, theta_values, param_values["loss_function"], indep_var_values, param_values["regularize"], param_values["optimization"], param_values["learning_rate"], param_values["max_iter"], batch_size = 64)
+            prediction_values = [theta_values["theta_0"]]  # predict fonksiyonunu düzelt ve onun çıktısını visualize fonksiyonuna girebilecek hale getir !!!
+            predictions = []
+            for i in range(len(X_test_sample[0])):
+                prediction_values.append(list(theta_values.values())[i+1] * self.X_test[i])
+            for i in range(len(X_test_sample)):
+                p = []
+                for e in range(i+1):
+                    p.append(prediction_values[e])
+                predictions.append(list(sum(p)))
+            predictions = np.array(predictions, dtype=object)   
+            self.visualize_data(predictions,Y_test_sample)
+            
+    def create_algorithm_group(self, name, params):
+        """Helper method to create algorithm parameter groups"""
+        group = QGroupBox(name)
+        layout = QVBoxLayout()
+     
+        # Create parameter inputs
+        param_widgets = {}
+        for param_name, param_type in params.items():
+            param_layout = QHBoxLayout()
+            param_layout.addWidget(QLabel(f"{param_name}:"))
+            
+            if param_type == "int":
+                widget = QSpinBox()
+                widget.setRange(1, 1000)
+            elif param_type == "double":
+                widget = QDoubleSpinBox()
+                widget.setRange(0.0001, 1000.0)
+                widget.setSingleStep(0.1)
+            elif param_type == "checkbox":
+                widget = QCheckBox()
+            elif isinstance(param_type, list):
+                widget = QComboBox()
+                widget.addItems(param_type)
+            
+            param_layout.addWidget(widget)
+            param_widgets[param_name] = widget
+            layout.addLayout(param_layout)
+
+        # Add train button
+        train_btn = QPushButton(f"Train {name}")
+        train_btn.clicked.connect(lambda: self.train_model(name, param_widgets))
+        layout.addWidget(train_btn)
+        
+        group.setLayout(layout)
+        return group
+
+    def show_error(self, message):
+        """Show error message dialog"""
+        QMessageBox.critical(self, "Error", message)
+       
+    def create_deep_learning_tab(self):
+        """Create the deep learning tab"""
+        widget = QWidget()
+        layout = QGridLayout(widget)
+        
+        # MLP section
+        mlp_group = QGroupBox("Multi-Layer Perceptron")
+        mlp_layout = QVBoxLayout()
+        
+        # Layer configuration
+        self.layer_config = []
+        layer_btn = QPushButton("Add Layer")
+        layer_btn.clicked.connect(self.add_layer_dialog)
+        mlp_layout.addWidget(layer_btn)
+        
+        # Training parameters
+        training_params_group = self.create_training_params_group()
+        mlp_layout.addWidget(training_params_group)
+        
+        # Train button
+        train_btn = QPushButton("Train Neural Network")
+        train_btn.clicked.connect(self.train_neural_network)
+        mlp_layout.addWidget(train_btn)
+        
+        mlp_group.setLayout(mlp_layout)
+        layout.addWidget(mlp_group, 0, 0)
+        
+        # CNN section
+        cnn_group = QGroupBox("Convolutional Neural Network")
+        cnn_layout = QVBoxLayout()
+        
+        # CNN architecture controls
+        cnn_controls = self.create_cnn_controls()
+        cnn_layout.addWidget(cnn_controls)
+        
+        cnn_group.setLayout(cnn_layout)
+        layout.addWidget(cnn_group, 0, 1)
+        
+        # RNN section
+        rnn_group = QGroupBox("Recurrent Neural Network")
+        rnn_layout = QVBoxLayout()
+        
+        # RNN architecture controls
+        rnn_controls = self.create_rnn_controls()
+        rnn_layout.addWidget(rnn_controls)
+        
+        rnn_group.setLayout(rnn_layout)
+        layout.addWidget(rnn_group, 1, 0)
+        
+        return widget
+    
+    def add_layer_dialog(self):
+        """Open a dialog to add a neural network layer"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add Neural Network Layer")
+        layout = QVBoxLayout(dialog)
+        
+        # Layer type selection
+        type_layout = QHBoxLayout()
+        type_label = QLabel("Layer Type:")
+        type_combo = QComboBox()
+        type_combo.addItems(["Dense", "Conv2D", "MaxPooling2D", "Flatten", "Dropout"])
+        type_layout.addWidget(type_label)
+        type_layout.addWidget(type_combo)
+        layout.addLayout(type_layout)
+        
+        # Parameters input
+        params_group = QGroupBox("Layer Parameters")
+        params_layout = QVBoxLayout()
+        
+        # Dynamic parameter inputs based on layer type
+        self.layer_param_inputs = {}
+        
+        def update_params():
+            # Clear existing parameter inputs
+            for widget in list(self.layer_param_inputs.values()):
+                params_layout.removeWidget(widget)
+                widget.deleteLater()
+            self.layer_param_inputs.clear()
+            
+            layer_type = type_combo.currentText()
+            if layer_type == "Dense":
+                units_label = QLabel("Units:")
+                units_input = QSpinBox()
+                units_input.setRange(1, 1000)
+                units_input.setValue(32)
+                self.layer_param_inputs["units"] = units_input
+                
+                activation_label = QLabel("Activation:")
+                activation_combo = QComboBox()
+                activation_combo.addItems(["relu", "sigmoid", "tanh", "softmax"])
+                self.layer_param_inputs["activation"] = activation_combo
+                
+                params_layout.addWidget(units_label)
+                params_layout.addWidget(units_input)
+                params_layout.addWidget(activation_label)
+                params_layout.addWidget(activation_combo)
+            
+            elif layer_type == "Conv2D":
+                filters_label = QLabel("Filters:")
+                filters_input = QSpinBox()
+                filters_input.setRange(1, 1000)
+                filters_input.setValue(32)
+                self.layer_param_inputs["filters"] = filters_input
+                
+                kernel_label = QLabel("Kernel Size:")
+                kernel_input = QLineEdit()
+                kernel_input.setText("3, 3")
+                self.layer_param_inputs["kernel_size"] = kernel_input
+                
+                params_layout.addWidget(filters_label)
+                params_layout.addWidget(filters_input)
+                params_layout.addWidget(kernel_label)
+                params_layout.addWidget(kernel_input)
+            
+            elif layer_type == "Dropout":
+                rate_label = QLabel("Dropout Rate:")
+                rate_input = QDoubleSpinBox()
+                rate_input.setRange(0.0, 1.0)
+                rate_input.setValue(0.5)
+                rate_input.setSingleStep(0.1)
+                self.layer_param_inputs["rate"] = rate_input
+                
+                params_layout.addWidget(rate_label)
+                params_layout.addWidget(rate_input)
+        
+        type_combo.currentIndexChanged.connect(update_params)
+        update_params()  # Initial update
+        
+        params_group.setLayout(params_layout)
+        layout.addWidget(params_group)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        add_btn = QPushButton("Add Layer")
+        cancel_btn = QPushButton("Cancel")
+        btn_layout.addWidget(add_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+        
+        def add_layer():
+            layer_type = type_combo.currentText()
+            
+            # Collect parameters
+            layer_params = {}
+            for param_name, widget in self.layer_param_inputs.items():
+                if isinstance(widget, QSpinBox):
+                    layer_params[param_name] = widget.value()
+                elif isinstance(widget, QDoubleSpinBox):
+                    layer_params[param_name] = widget.value()
+                elif isinstance(widget, QComboBox):
+                    layer_params[param_name] = widget.currentText()
+                elif isinstance(widget, QLineEdit):
+                    # Handle kernel size or other tuple-like inputs
+                    if param_name == "kernel_size":
+                        layer_params[param_name] = tuple(map(int, widget.text().split(',')))
+            
+            self.layer_config.append({
+                "type": layer_type,
+                "params": layer_params
+            })
+            
+            dialog.accept()
+        
+        add_btn.clicked.connect(add_layer)
+        cancel_btn.clicked.connect(dialog.reject)
+        
+        dialog.exec()
+    
+    def create_training_params_group(self):
+        """Create group for neural network training parameters"""
+        group = QGroupBox("Training Parameters")
+        layout = QVBoxLayout()
+        
+        # Batch size
+        batch_layout = QHBoxLayout()
+        batch_layout.addWidget(QLabel("Batch Size:"))
+        self.batch_size_spin = QSpinBox()
+        self.batch_size_spin.setRange(1, 1000)
+        self.batch_size_spin.setValue(32)
+        batch_layout.addWidget(self.batch_size_spin)
+        layout.addLayout(batch_layout)
+        
+        # Epochs
+        epochs_layout = QHBoxLayout()
+        epochs_layout.addWidget(QLabel("Epochs:"))
+        self.epochs_spin = QSpinBox()
+        self.epochs_spin.setRange(1, 1000)
+        self.epochs_spin.setValue(10)
+        epochs_layout.addWidget(self.epochs_spin)
+        layout.addLayout(epochs_layout)
+        
+        # Learning rate
+        lr_layout = QHBoxLayout()
+        lr_layout.addWidget(QLabel("Learning Rate:"))
+        self.lr_spin = QDoubleSpinBox()
+        self.lr_spin.setRange(0.0001, 1.0)
+        self.lr_spin.setValue(0.001)
+        self.lr_spin.setSingleStep(0.001)
+        lr_layout.addWidget(self.lr_spin)
+        layout.addLayout(lr_layout)
+        
+        group.setLayout(layout)
+        return group
+    
+    def create_cnn_controls(self):
+        """Create controls for Convolutional Neural Network"""
+        group = QGroupBox("CNN Architecture")
+        layout = QVBoxLayout()
+        
+        # Placeholder for CNN-specific controls
+        label = QLabel("CNN Controls (To be implemented)")
+        layout.addWidget(label)
+        
+        group.setLayout(layout)
+        return group
+    
+    def create_rnn_controls(self):
+        """Create controls for Recurrent Neural Network"""
+        group = QGroupBox("RNN Architecture")
+        layout = QVBoxLayout()
+        
+        # Placeholder for RNN-specific controls
+        label = QLabel("RNN Controls (To be implemented)")
+        layout.addWidget(label)
+        
+        group.setLayout(layout)
+        return group
+    
+    def train_neural_network(self):
+        """Train the neural network with current configuration"""
+        if not self.layer_config:
+            self.show_error("Please add at least one layer to the network")
+            return
+        
+        try:
+            # Create and compile model
+            model = self.create_neural_network()
+            
+            # Get training parameters
+            batch_size = self.batch_size_spin.value()
+            epochs = self.epochs_spin.value()
+            learning_rate = self.lr_spin.value()
+            
+            # Prepare data for neural network
+            if len(self.X_train.shape) == 1:
+                X_train = self.X_train.reshape(-1, 1)
+                X_test = self.X_test.reshape(-1, 1)
+            else:
+                X_train = self.X_train
+                X_test = self.X_test
+            
+            # One-hot encode target for classification
+            y_train = tf.keras.utils.to_categorical(self.y_train)
+            y_test = tf.keras.utils.to_categorical(self.y_test)
+            
+            # Compile model
+            optimizer = optimizers.Adam(learning_rate=learning_rate)
+            model.compile(optimizer=optimizer,
+                          loss='categorical_crossentropy',
+                          metrics=['accuracy'])
+            
+            # Train model
+            history = model.fit(X_train, y_train,
+                                batch_size=batch_size,
+                                epochs=epochs,
+                                validation_data=(X_test, y_test),
+                                callbacks=[self.create_progress_callback()])
+            
+            # Update visualization with training history
+            self.plot_training_history(history)
+            
+            self.status_bar.showMessage("Neural Network Training Complete")
+            
+        except Exception as e:
+            self.show_error(f"Error training neural network: {str(e)}")
+    
+    def create_neural_network(self):
+        """Create neural network based on current configuration"""
+        model = models.Sequential()
+        
+        # Add layers based on configuration
+        for layer_config in self.layer_config:
+            layer_type = layer_config["type"]
+            params = layer_config["params"]
+            
+            if layer_type == "Dense":
+                model.add(layers.Dense(**params))
+            elif layer_type == "Conv2D":
+                # Add input shape for the first layer
+                if len(model.layers) == 0:
+                    params['input_shape'] = self.X_train.shape[1:]
+                model.add(layers.Conv2D(**params))
+            elif layer_type == "MaxPooling2D":
+                model.add(layers.MaxPooling2D())
+            elif layer_type == "Flatten":
+                model.add(layers.Flatten())
+            elif layer_type == "Dropout":
+                model.add(layers.Dropout(**params))
+        
+        # Add output layer based on number of classes
+        num_classes = len(np.unique(self.y_train))
+        model.add(layers.Dense(num_classes, activation='softmax'))
+                
+        return model
+        
+    def train_neural_network(self):
+        """Train the neural network"""
+        try:
+            # Create and compile model
+            model = self.create_neural_network()
+            
+            # Get training parameters
+            batch_size = self.batch_size_spin.value()
+            epochs = self.epochs_spin.value()
+            learning_rate = self.lr_spin.value()
+            
+            # Compile model
+            optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+            model.compile(optimizer=optimizer,
+                        loss='categorical_crossentropy',
+                        metrics=['accuracy'])
+            
+            # Train model
+            history = model.fit(self.X_train, self.y_train,
+                              batch_size=batch_size,
+                              epochs=epochs,
+                              validation_data=(self.X_test, self.y_test),
+                              callbacks=[self.create_progress_callback()])
+            
+            # Update visualization with training history
+            self.plot_training_history(history)
+            
+        except Exception as e:
+            self.show_error(f"Error training neural network: {str(e)}")
+            
+    def create_progress_callback(self):
+        """Create callback for updating progress bar during training"""
+        class ProgressCallback(tf.keras.callbacks.Callback):
+            def __init__(self, progress_bar):
+                super().__init__()
+                self.progress_bar = progress_bar
+                
+            def on_epoch_end(self, epoch, logs=None):
+                progress = int(((epoch + 1) / self.params['epochs']) * 100)
+                self.progress_bar.setValue(progress)
+                
+        return ProgressCallback(self.progress_bar)
+        
+    def update_visualization(self, y_pred):
+        """Update the visualization with current results"""
+        self.figure.clear()
+        
+        # Create appropriate visualization based on data
+        if len(np.unique(self.y_test)) > 10:  # Regression
+            ax = self.figure.add_subplot(111)
+            ax.scatter(self.y_test, y_pred)
+            ax.plot([self.y_test.min(), self.y_test.max()],
+                   [self.y_test.min(), self.y_test.max()],
+                   'r--', lw=2)
+            ax.set_xlabel("Actual Values")
+            ax.set_ylabel("Predicted Values")
+            
+        else:  # Classification
+            if self.X_train.shape[1] > 2:  # Use PCA for visualization
+                pca = PCA(n_components=2)
+                X_test_2d = pca.fit_transform(self.X_test)
+                
+                ax = self.figure.add_subplot(111)
+                scatter = ax.scatter(X_test_2d[:, 0], X_test_2d[:, 1],
+                                   c=y_pred, cmap='viridis')
+                self.figure.colorbar(scatter)
+                
+            else:  # Direct 2D visualization
+                ax = self.figure.add_subplot(111)
+                scatter = ax.scatter(self.X_test[:, 0], self.X_test[:, 1],
+                                   c=y_pred, cmap='viridis')
+                self.figure.colorbar(scatter)
+        
+        self.canvas.draw()
+        
+    def update_metrics(self, y_pred):
+        """Update metrics display"""
+        metrics_text = "Model Performance Metrics:\n\n"
+        
+        # Calculate appropriate metrics based on problem type
+        if len(np.unique(self.y_test)) > 10:  # Regression
+            mse = mean_squared_error(self.y_test, y_pred)
+            rmse = np.sqrt(mse)
+            r2 = self.current_model.score(self.X_test, self.y_test)
+            
+            metrics_text += f"Mean Squared Error: {mse:.4f}\n"
+            metrics_text += f"Root Mean Squared Error: {rmse:.4f}\n"
+            metrics_text += f"R² Score: {r2:.4f}"
+            
+        else:  # Classification
+            accuracy = accuracy_score(self.y_test, y_pred)
+            conf_matrix = confusion_matrix(self.y_test, y_pred)
+            
+            metrics_text += f"Accuracy: {accuracy:.4f}\n\n"
+            metrics_text += "Confusion Matrix:\n"
+            metrics_text += str(conf_matrix)
+        
+        self.metrics_text.setText(metrics_text)
+        
+    def plot_training_history(self, history):
+        """Plot neural network training history"""
+        self.figure.clear()
+        
+        # Plot training & validation accuracy
+        ax1 = self.figure.add_subplot(211)
+        ax1.plot(history.history['accuracy'])
+        ax1.plot(history.history['val_accuracy'])
+        ax1.set_title('Model Accuracy')
+        ax1.set_ylabel('Accuracy')
+        ax1.set_xlabel('Epoch')
+        ax1.legend(['Train', 'Test'])
+        
+        # Plot training & validation loss
+        ax2 = self.figure.add_subplot(212)
+        ax2.plot(history.history['loss'])
+        ax2.plot(history.history['val_loss'])
+        ax2.set_title('Model Loss')
+        ax2.set_ylabel('Loss')
+        ax2.set_xlabel('Epoch')
+        ax2.legend(['Train', 'Test'])
+        
+        self.figure.tight_layout()
+        self.canvas.draw()
+        
+    def show_error(self, message):
+        """Show error message dialog"""
+        QMessageBox.critical(self, "Error", message)
+
+def main():
+    """Main function to start the application"""
+    app = QApplication(sys.argv)
+    window = MLCourseGUI()
+    window.show()
+    sys.exit(app.exec())
+
+if __name__ == '__main__':
+    main()
